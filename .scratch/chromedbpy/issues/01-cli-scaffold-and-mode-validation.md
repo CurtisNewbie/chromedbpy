@@ -4,11 +4,11 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The project installs and exposes a `chromedbpy` console script.
-- [ ] `chromedbpy -p <dir> -c` and `chromedbpy -p <dir> -ls` each parse and dispatch to their mode.
-- [ ] Supplying no mode, or both modes, prints usage and exits non-zero.
-- [ ] Omitting the profile path prints usage and exits non-zero.
-- [ ] On a non-macOS platform the command reports the feature as unsupported and exits non-zero; covered by a test that simulates another platform.
-- [ ] A test drives the command line entry point in-process and asserts on stdout and the exit code.
+- [x] The project installs and exposes a `chromedbpy` console script.
+- [x] `chromedbpy -p <dir> -c` and `chromedbpy -p <dir> -ls` each parse and dispatch to their mode.
+- [x] Supplying no mode, or both modes, prints usage and exits non-zero.
+- [x] Omitting the profile path prints usage and exits non-zero.
+- [x] On a non-macOS platform the command reports the feature as unsupported and exits non-zero; covered by a test that simulates another platform.
+- [x] A test drives the command line entry point in-process and asserts on stdout and the exit code.
