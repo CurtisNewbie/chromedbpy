@@ -215,6 +215,48 @@ def test_plaintext_cookie_keeps_the_database_value(
     assert cookie["encrypted_value"] == ""
 
 
+def test_null_value_column_is_reported_the_way_go_does(
+    tmp_path, monkeypatch, capsys
+):
+    # Go scans ``value`` into a string; a NULL row aborts the whole dump with
+    # database/sql's wording and exit code 1, and no Python traceback.
+    with ProfileFixture(password=PASSWORD, version=18) as fixture:
+        with sqlite3.connect(fixture.path / "Cookies") as conn:
+            conn.execute(
+                "INSERT INTO cookies (name, value, host_key, encrypted_value)"
+                " VALUES (?, ?, ?, ?)",
+                ("nullvalue", None, "example.com", b""),
+            )
+            conn.commit()
+        exit_code, lines = _run_cookies(fixture.path, monkeypatch, capsys)
+
+    assert exit_code == 1
+    assert lines == [
+        "Error opening Cookies database: sql: Scan error on column index 1, "
+        'name "value": converting NULL to string is unsupported'
+    ]
+
+
+def test_null_encrypted_value_is_emitted_as_null(tmp_path, monkeypatch, capsys):
+    # Go's ``[]byte`` field is nil for a NULL column and marshals to ``null``,
+    # where an empty BLOB marshals to ``""``.
+    with ProfileFixture(password=PASSWORD, version=18) as fixture:
+        with sqlite3.connect(fixture.path / "Cookies") as conn:
+            conn.execute(
+                "INSERT INTO cookies (name, value, host_key, encrypted_value)"
+                " VALUES (?, ?, ?, ?)",
+                ("nullenc", "already-readable", "example.com", None),
+            )
+            conn.commit()
+        exit_code, lines = _run_cookies(fixture.path, monkeypatch, capsys)
+
+    assert exit_code == 0
+    assert '"encrypted_value":null' in lines[0]
+    cookie = json.loads(lines[0])
+    assert cookie["encrypted_value"] is None
+    assert cookie["value"] == "already-readable"
+
+
 def test_version_24_cookie_is_decrypted_with_the_domain_digest_dropped(
     tmp_path, monkeypatch, capsys
 ):

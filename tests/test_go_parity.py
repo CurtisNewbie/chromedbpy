@@ -8,15 +8,10 @@ claim behind the drop-in replacement is checked rather than asserted.
 The check is skipped, never failed, when the Go toolchain or the network is
 unavailable, so the rest of the suite stays hermetic.
 
-The fixture deliberately excludes the divergences documented by earlier
-tickets, because they are out of this check's scope:
+The fixture still excludes two divergences that are out of this check's scope:
 
-- a value that is valid JSON but contains invalid UTF-8 inside a string
-  (Python keeps valid JSON, Go writes the raw byte);
 - ``deb`` magic bytes (the Go detector is non-deterministic across runs);
-- an ``avif`` sample whose ``ftyp`` box length is ``0x14``;
-- types only the Go library can detect (``macho``, ``dex``, ISO-9660, real JP2
-  signatures).
+- an ``avif`` sample whose ``ftyp`` box length is ``0x14``.
 """
 
 from __future__ import annotations
@@ -89,7 +84,18 @@ _LOCAL_STORAGE_RECORDS = [
     ("https://a.test", "json str", '"already a string"', 0),
     ("https://a.test", "html", "<b>&amp;</b>", 0),
     ("https://a.test", "empty", "", 0),
+    # Valid JSON whose strings hold invalid UTF-8: Go emits the raw bytes, so
+    # this line is itself invalid UTF-8 and is compared as raw stdout bytes.
+    ("https://a.test", "json bad utf8", b'{"a":"\xff\xfe"}', 1),
+    ("https://a.test", "json bad utf8 arr", b'["\xff"]', 1),
     ("https://a.test", "iso", b"caf\xe9", 1),
+    # Control bytes and separators, in a text value, a JSON value and the keys,
+    # to pin the shared Go encoder's \b/\f, \xNN and \u2028/\u2029 handling.
+    ("https://a.test", "ctl", "a\tb\bc\fd\ve\x01f", 0),
+    ("https://a.test", "para", "p\u2028q\u2029r", 0),
+    ("https://a.test", "json para", '{"a":"p\u2028q\u2029r"}', 0),
+    ("https://a.test\u2028key", "keysep", "plain", 0),
+    ("https://a.test", "key\bctl", "plain", 0),
     ("https://a.test", "png", b"\x89PNG\r\n\x1a\npayload", 1),
     ("https://a.test", "jpg", b"\xff\xd8\xff\xe0payload", 1),
     ("https://a.test", "gif", b"GIF89apayload", 1),
@@ -131,6 +137,28 @@ _LOCAL_STORAGE_RECORDS = [
         "https://a.test",
         "jpx",
         b"\x00\x00\x00\x0c" + b"\x00" * 12 + b"ftypjp2 " + b"\x00" * 30,
+        1,
+    ),
+    # Types only the Go library detects; the port has no matcher, so these are
+    # restored from Go's byte layouts. The JP2 signature is the overlap: Python
+    # answers ``jpx`` (the entry above pins the Python-only layout), Go answers
+    # ``jp2`` for a real signature box.
+    ("https://a.test", "macho", b"\xfe\xed\xfa\xcfpayload", 1),
+    ("https://a.test", "dex", b"dex\n" + b"\x00" * 32 + b"\x70payload", 1),
+    (
+        "https://a.test",
+        "dey",
+        b"dey\n" + b"\x00" * 36 + b"dex\n" + b"\x00" * 32 + b"\x70" + b"x" * 30,
+        1,
+    ),
+    ("https://a.test", "iso", b"\x00" * 32769 + b"CD001payload", 1),
+    (
+        "https://a.test",
+        "jp2",
+        b"\x00\x00\x00\x0c\x6a\x50\x20\x20\x0d\x0a\x87\x0a"
+        + b"\x00\x00\x00\x14ftypjp2 "
+        + b"\x00\x00\x00\x00jp2 mif1miafheic"
+        + b"\x00" * 16,
         1,
     ),
 ]

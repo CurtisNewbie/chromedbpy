@@ -12,8 +12,9 @@ shape this module:
   behave, not the way Python's ``json`` module behaves. Go keeps printable
   non-ASCII as-is, writes ``\\xNN`` for some control bytes, and HTML-escapes
   ``<``, ``>``, ``&`` and U+2028/U+2029.
-- A value that survives quoting has its mime set to ``text/plain`` and then
-  immediately overwritten by the sniffed content type.
+- A value that survives quoting gets its mime from content sniffing, not from
+  the ``text/plain`` the Go tool sets first and immediately overwrites, so only
+  the sniffed type is observable.
 - A JSON number the Go decoder cannot turn into a float64 is emitted as a
   string instead of a number.
 - A leveldb directory that cannot be walked is reported twice: once where the
@@ -29,14 +30,16 @@ import math
 import os
 import shutil
 import stat
+import sys
 import tempfile
-import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
 import filetype
 import plyvel
 from mimesniff import what as detect_content_type
+
+from chromedbpy import goencoding
 
 _META_PREFIX = b"META:"
 _RECORD_PREFIX = b"_"
@@ -71,18 +74,37 @@ _GO_MIME_OVERRIDES = {
     "deb": "application/vnd.debian.binary-package",
     "avif": _DEFAULT_MIME,
     "br": _DEFAULT_MIME,
+    # Python's JPX layout; a real JP2 signature is matched below as `image/jp2`.
     "jpx": _DEFAULT_MIME,
     "lz4": _DEFAULT_MIME,
     "lzo": _DEFAULT_MIME,
     "xcf": _DEFAULT_MIME,
 }
 
+# Types the Go library detects and the Python port has no matcher for at all.
+# These are matched by hand below, in the library's own byte layout. A real JP2
+# signature is the one overlap: Python answers `jpx`, Go answers `jp2`, and the
+# override table is keyed by the Python extension, so the Go signature is
+# checked first.
+_GO_JP2_MIME = "image/jp2"
+_GO_MACHO_MIME = "application/x-mach-binary"
+_GO_DEX_MIME = "application/vnd.android.dex"
+_GO_DEY_MIME = "application/vnd.android.dey"
+_GO_ISO_MIME = "application/x-iso9660-image"
+
+_MACHO_MAGICS = (
+    b"\xfe\xed\xfa\xcf",
+    b"\xfe\xed\xfa\xce",
+    b"\xbe\xba\xfe\xca",
+    b"\xcf\xfa\xed\xfe",
+    b"\xce\xfa\xed\xfe",
+    b"\xca\xfe\xba\xbe",
+)
+
 # The names of the transformations, spelled the way the Go tool puts them in
 # the `conversions` array (they name internal Go calls).
 _QUOTE_CONVERSION = "strconv.Quote"
 _BASE64_CONVERSION = "base64.StdEncoding.EncodeToString"
-
-_JSON_WHITESPACE = frozenset(b" \t\n\r")
 
 
 class LocalStorageError(Exception):
@@ -96,15 +118,6 @@ class _DirectoryCopyError(Exception):
     again as the LevelDB open error that ends the mode; the wording carries the
     OS error, so the message is built exactly where the walk fails.
     """
-
-
-@dataclass(frozen=True)
-class StorageMetadata:
-    """A ``META:`` entry: parsed for validation, never emitted."""
-
-    storage_key: str
-    timestamp_microseconds: int
-    size: int
 
 
 @dataclass(frozen=True)
@@ -158,8 +171,8 @@ def _consume_varint(data: bytes, pos: int) -> tuple[int | None, int]:
     return None, pos
 
 
-def _parse_metadata(storage_key: bytes, value: bytes) -> StorageMetadata:
-    """Decode a ``META:`` value: a two-field varint protobuf message.
+def _parse_metadata(value: bytes) -> None:
+    """Validate a ``META:`` value: a two-field varint protobuf message.
 
     Field 1 is a Chromium microsecond timestamp and field 2 is the size in
     bytes. Nothing is emitted from this; it is parsed because the Go tool
@@ -188,12 +201,6 @@ def _parse_metadata(storage_key: bytes, value: bytes) -> StorageMetadata:
     size, _ = _consume_varint(value, pos)
     if size is None:
         raise LocalStorageError("Failed to decode size")
-
-    return StorageMetadata(
-        storage_key=storage_key.decode("utf-8", "replace"),
-        timestamp_microseconds=timestamp,
-        size=size,
-    )
 
 
 def _record_from_entry(key: bytes, value: bytes) -> _Record | None:
@@ -274,7 +281,7 @@ def _load_records(leveldb_dir: Path) -> list[_Record]:
             for key, value in db:
                 if key.startswith(_META_PREFIX):
                     # Parsed for validation, never emitted, matching the Go tool.
-                    _parse_metadata(key[len(_META_PREFIX) :], value)
+                    _parse_metadata(value)
                 elif key.startswith(_RECORD_PREFIX):
                     record = _record_from_entry(key, value)
                     if record is not None:
@@ -283,88 +290,6 @@ def _load_records(leveldb_dir: Path) -> list[_Record]:
 
 
 # --- Value conversion ------------------------------------------------------
-
-
-def _decode_rune(raw: bytes, pos: int) -> tuple[int | None, int]:
-    """Decode one UTF-8 rune the way Go's ``utf8.DecodeRune`` does.
-
-    An invalid sequence is reported as ``(None, 1)``: Go answers with the
-    replacement rune and a width of one byte.
-    """
-    first = raw[pos]
-    if 0xC2 <= first <= 0xDF:
-        width = 2
-    elif 0xE0 <= first <= 0xEF:
-        width = 3
-    elif 0xF0 <= first <= 0xF4:
-        width = 4
-    else:
-        return None, 1
-
-    chunk = raw[pos : pos + width]
-    if len(chunk) < width:
-        return None, 1
-    try:
-        return ord(chunk.decode("utf-8")), width
-    except UnicodeDecodeError:
-        return None, 1
-
-
-def _is_print(rune: int) -> bool:
-    """Go's ``strconv.IsPrint``: letters, marks, numbers, punctuation, symbols."""
-    if 0x20 <= rune <= 0x7E:
-        return True
-    return unicodedata.category(chr(rune))[0] in "LMNPS"
-
-
-# Go's named escapes; everything else below the printable range becomes \xNN.
-_NAMED_ESCAPES = {
-    0x07: "\\a",
-    0x08: "\\b",
-    0x09: "\\t",
-    0x0A: "\\n",
-    0x0B: "\\v",
-    0x0C: "\\f",
-    0x0D: "\\r",
-}
-
-
-def _go_quote(raw: bytes) -> str:
-    """Quote ``raw`` the way Go's ``strconv.Quote`` does.
-
-    This is deliberately not ``json.dumps``: Go leaves printable non-ASCII
-    alone, uses ``\\xNN`` for control bytes outside its named escapes, and
-    escapes runes it does not consider printable as ``\\uNNNN``. Its output is
-    not always valid JSON, which is the whole point of the branch that reads it.
-    """
-    out = ['"']
-    pos = 0
-    while pos < len(raw):
-        byte = raw[pos]
-        if byte < 0x80:
-            pos += 1
-            if byte in (0x22, 0x5C):
-                out.append("\\" + chr(byte))
-            elif byte in _NAMED_ESCAPES:
-                out.append(_NAMED_ESCAPES[byte])
-            elif 0x20 <= byte <= 0x7E:
-                out.append(chr(byte))
-            else:
-                out.append(f"\\x{byte:02x}")
-            continue
-
-        rune, width = _decode_rune(raw, pos)
-        if rune is None:
-            out.append(f"\\x{byte:02x}")
-        elif _is_print(rune):
-            out.append(raw[pos : pos + width].decode("utf-8"))
-        elif rune < 0x10000:
-            out.append(f"\\u{rune:04x}")
-        else:
-            out.append(f"\\U{rune:08x}")
-        pos += width
-    out.append('"')
-    return "".join(out)
 
 
 class _NumberLiteral(str):
@@ -410,8 +335,38 @@ def _overflows_float64(literal: _NumberLiteral) -> bool:
     return math.isinf(value)
 
 
+def _go_only_mime(raw: bytes) -> str | None:
+    """Match the types only the Go library knows, in its own byte layout."""
+    if len(raw) > 3 and raw[:4] in _MACHO_MAGICS:
+        return _GO_MACHO_MIME
+    # ``dey`` wraps a ``dex`` at a fixed offset; check it before plain ``dex``.
+    if (
+        len(raw) > 100
+        and raw[0:4] == b"dey\n"
+        and raw[40:44] == b"dex\n"
+        and raw[76] == 0x70
+    ):
+        return _GO_DEY_MIME
+    if len(raw) > 36 and raw[0:4] == b"dex\n" and raw[36] == 0x70:
+        return _GO_DEX_MIME
+    if len(raw) > 32773 and raw[32769:32774] == b"CD001":
+        return _GO_ISO_MIME
+    if (
+        len(raw) > 12
+        and raw[0:4] == b"\x00\x00\x00\x0c"
+        and raw[4:8] == b"\x6a\x50\x20\x20"
+        and raw[8:12] == b"\x0d\x0a\x87\x0a"
+        and raw[12] == 0x00
+    ):
+        return _GO_JP2_MIME
+    return None
+
+
 def _magic_mime(raw: bytes) -> str:
     """Match magic bytes and answer with the MIME string the Go tool reports."""
+    go_only = _go_only_mime(raw)
+    if go_only is not None:
+        return go_only
     magic = filetype.match(raw)
     if magic is None:
         return _DEFAULT_MIME
@@ -430,140 +385,45 @@ def _convert_value(record: _Record) -> tuple[str, list[str], bytes]:
             return _JSON_MIME, [], b'"' + parsed.encode("ascii") + b'"'
         return _JSON_MIME, [], raw
 
-    quoted = _go_quote(raw)
-    if _is_valid_json(quoted.encode("utf-8")):
-        # The Go tool sets text/plain here and then overwrites it with the
-        # sniffed type; the overwrite is intentional, so it is reproduced.
+    quoted = goencoding.quote(raw)
+    if _is_valid_json(quoted):
+        # A quotable value's mime comes from content sniffing (the Go tool
+        # computes ``text/plain`` first and overwrites it, so only the sniffed
+        # type is observable).
         mime = detect_content_type(raw).split(";")[0]
-        return mime, [_QUOTE_CONVERSION], quoted.encode("utf-8")
+        return mime, [_QUOTE_CONVERSION], quoted
 
-    encoded = base64.standard_b64encode(raw).decode("ascii")
+    encoded = base64.standard_b64encode(raw)
     return (
         _magic_mime(raw),
         [_BASE64_CONVERSION, _QUOTE_CONVERSION],
-        _go_quote(encoded.encode("utf-8")).encode("utf-8"),
+        goencoding.quote(encoded),
     )
 
 
 # --- Writing the line ------------------------------------------------------
 
 
-def _json_string(raw: bytes) -> str:
-    """Quote a string field the way Go's ``json.Marshal`` does.
-
-    Differences from Python's ``json``: ``<``, ``>`` and ``&`` are escaped,
-    U+2028 and U+2029 are escaped, and an invalid UTF-8 byte becomes the
-    replacement character escape.
-    """
-    out = ['"']
-    pos = 0
-    while pos < len(raw):
-        byte = raw[pos]
-        if byte < 0x80:
-            pos += 1
-            if byte == 0x22:
-                out.append('\\"')
-            elif byte == 0x5C:
-                out.append("\\\\")
-            elif byte == 0x0A:
-                out.append("\\n")
-            elif byte == 0x0D:
-                out.append("\\r")
-            elif byte == 0x09:
-                out.append("\\t")
-            elif byte < 0x20:
-                out.append(f"\\u{byte:04x}")
-            elif byte == 0x3C:
-                out.append("\\u003c")
-            elif byte == 0x3E:
-                out.append("\\u003e")
-            elif byte == 0x26:
-                out.append("\\u0026")
-            else:
-                out.append(chr(byte))
-            continue
-
-        rune, width = _decode_rune(raw, pos)
-        if rune is None:
-            out.append("\\ufffd")
-        elif rune in (0x2028, 0x2029):
-            out.append(f"\\u{rune:04x}")
-        else:
-            out.append(raw[pos : pos + width].decode("utf-8"))
-        pos += width
-    out.append('"')
-    return "".join(out)
-
-
-def _compact(fragment: bytes) -> str:
-    """Compact and HTML-escape a raw JSON fragment, as Go's ``json`` does.
-
-    ``json.RawMessage`` goes through ``json.Marshal``, which drops whitespace
-    outside strings and HTML-escapes the fragment just like a plain string.
-    """
-    out: list[str] = []
-    in_string = False
-    pos = 0
-    while pos < len(fragment):
-        byte = fragment[pos]
-        if byte == 0x5C and in_string:
-            out.append(fragment[pos : pos + 2].decode("ascii", "replace"))
-            pos += 2
-            continue
-        if byte == 0x22:
-            in_string = not in_string
-            out.append('"')
-            pos += 1
-            continue
-        if byte in _JSON_WHITESPACE and not in_string:
-            pos += 1
-            continue
-        if byte == 0x3C:
-            out.append("\\u003c")
-            pos += 1
-            continue
-        if byte == 0x3E:
-            out.append("\\u003e")
-            pos += 1
-            continue
-        if byte == 0x26:
-            out.append("\\u0026")
-            pos += 1
-            continue
-
-        if byte < 0x80:
-            out.append(chr(byte))
-            pos += 1
-            continue
-        rune, width = _decode_rune(fragment, pos)
-        if rune is None:
-            out.append("\ufffd")
-        elif rune in (0x2028, 0x2029):
-            out.append(f"\\u{rune:04x}")
-        else:
-            out.append(fragment[pos : pos + width].decode("utf-8"))
-        pos += width
-    return "".join(out)
-
-
-def _record_to_json(record: _Record) -> str:
+def _record_to_json(record: _Record) -> bytes:
     """Render one record as a JSON object, fields in the Go struct's order."""
     mime, conversions, value = _convert_value(record)
-    converted = ",".join(_json_string(item.encode("ascii")) for item in conversions)
+    converted = b",".join(
+        goencoding.json_string(item.encode("ascii")) for item in conversions
+    )
     return (
-        '{"storage_key":'
-        + _json_string(record.storage_key)
-        + ',"script_key":'
-        + _json_string(record.script_key)
-        + ',"charset":'
-        + _json_string(record.charset.encode("ascii"))
-        + ',"mime":'
-        + _json_string(mime.encode("ascii"))
-        + ',"conversions":['
+        b'{"storage_key":'
+        + goencoding.json_string(record.storage_key)
+        + b',"script_key":'
+        + goencoding.json_string(record.script_key)
+        + b',"charset":'
+        + goencoding.json_string(record.charset.encode("ascii"))
+        + b',"mime":'
+        + goencoding.json_string(mime.encode("ascii"))
+        + b',"conversions":['
         + converted
-        + '],"value":'
-        + _compact(value)
-        + "}"
+        + b'],"value":'
+        + goencoding.compact(value)
+        + b"}"
     )
 
 
@@ -584,5 +444,7 @@ def run(profile_path: str) -> int:
         return 1
 
     for record in records:
-        print(_record_to_json(record))
+        # Written as bytes: a valid JSON value is emitted byte for byte, which
+        # can leave invalid UTF-8 in the line.
+        sys.stdout.buffer.write(_record_to_json(record) + b"\n")
     return 0

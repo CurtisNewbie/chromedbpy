@@ -22,12 +22,17 @@ import sqlite3
 import keyring
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+from chromedbpy import goencoding
 from chromedbpy.keys import derive_key
 
 _AES_BLOCK_SIZE = 16
 _AES_IV = b" " * 16
 _V10_PREFIX = b"v10"
 _DOMAIN_DIGEST_SIZE = 32
+
+# The three ``cookies`` columns Go scans into a ``string``. A NULL in any of
+# them makes ``database/sql`` fail, and the error aborts the whole dump.
+_COOKIE_TEXT_COLUMNS = ("name", "value", "host_key")
 
 # The keychain service each browser profile uses, keyed by a marker in the
 # profile's path. The marker is matched case-sensitively, so an unrelated
@@ -54,6 +59,21 @@ _SERVICE_SUFFIX = " Safe Storage"
 
 class _DecryptError(Exception):
     """A cookie value that could not be decrypted."""
+
+
+class _ScanError(Exception):
+    """A NULL in a cookie text column, worded the way Go's database/sql words it."""
+
+
+def _scan_error(row: tuple) -> _ScanError | None:
+    """Return the ``database/sql`` error for a row with a NULL text column."""
+    for index, column in enumerate(_COOKIE_TEXT_COLUMNS):
+        if row[index] is None:
+            return _ScanError(
+                f'sql: Scan error on column index {index}, name "{column}": '
+                "converting NULL to string is unsupported"
+            )
+    return None
 
 
 def _trimmed_env_password() -> str | None:
@@ -127,6 +147,10 @@ def _read_cookies(cookies_path: str) -> tuple[list[tuple], int]:
         ).fetchall()
     finally:
         connection.close()
+    for row in rows:
+        error = _scan_error(row)
+        if error is not None:
+            raise error
     return rows, db_version
 
 
@@ -181,55 +205,25 @@ def _decrypt_value(
 
 
 def _json_string(value: str) -> str:
-    """Encode ``value`` the way Go's ``encoding/json`` encodes a string.
-
-    Go HTML-escapes ``<``, ``>`` and ``&`` and always escapes the line and
-    paragraph separators, while leaving printable non-ASCII characters as UTF-8.
-    """
-    out = ['"']
-    for character in value:
-        if character == '"':
-            out.append('\\"')
-        elif character == "\\":
-            out.append("\\\\")
-        elif character == "\n":
-            out.append("\\n")
-        elif character == "\r":
-            out.append("\\r")
-        elif character == "\t":
-            out.append("\\t")
-        elif character == "\b":
-            out.append("\\b")
-        elif character == "\f":
-            out.append("\\f")
-        elif character < " ":
-            out.append("\\u%04x" % ord(character))
-        elif character == "<":
-            out.append("\\u003c")
-        elif character == ">":
-            out.append("\\u003e")
-        elif character == "&":
-            out.append("\\u0026")
-        elif ord(character) == 0x2028:
-            out.append("\\u2028")
-        elif ord(character) == 0x2029:
-            out.append("\\u2029")
-        else:
-            out.append(character)
-    out.append('"')
-    return "".join(out)
+    """Encode ``value`` as a JSON string via the shared Go ``encoding/json`` encoder."""
+    return goencoding.json_string(value.encode("utf-8")).decode("utf-8")
 
 
 def _format_cookie(
-    domain: str, name: str, encrypted_value: bytes, value: str
+    domain: str, name: str, encrypted_value: bytes | None, value: str
 ) -> str:
     """Render a cookie as the one-line JSON object the reference tool writes."""
-    encoded = base64.b64encode(encrypted_value).decode("ascii")
+    if encrypted_value is None:
+        # Go's ``[]byte`` field is nil for a NULL column and marshals to null.
+        encoded_json = "null"
+    else:
+        encoded = base64.b64encode(encrypted_value).decode("ascii")
+        encoded_json = _json_string(encoded)
     return (
         "{"
         + '"domain":' + _json_string(domain) + ","
         + '"name":' + _json_string(name) + ","
-        + '"encrypted_value":' + _json_string(encoded) + ","
+        + '"encrypted_value":' + encoded_json + ","
         + '"value":' + _json_string(value)
         + "}"
     )
@@ -240,7 +234,7 @@ def run(profile_path: str) -> int:
     cookies_path = os.path.join(profile_path, "Cookies")
     try:
         rows, db_version = _read_cookies(cookies_path)
-    except sqlite3.Error as err:
+    except (sqlite3.Error, _ScanError) as err:
         print(f"Error opening Cookies database: {err}")
         return 1
 
@@ -260,9 +254,5 @@ def run(profile_path: str) -> int:
             except _DecryptError as err:
                 print(f"Failed to decrypt cookie {name}: {err}")
                 decrypted = ""
-        print(
-            _format_cookie(
-                host_key, name, bytes(encrypted_value or b""), decrypted
-            )
-        )
+        print(_format_cookie(host_key, name, encrypted_value, decrypted))
     return 0

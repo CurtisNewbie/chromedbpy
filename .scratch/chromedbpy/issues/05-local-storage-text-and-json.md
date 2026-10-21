@@ -38,9 +38,9 @@ for a valid JSON value, and never sniffs it. The oracle confirms this, and the t
 (and the spec's) reads loosely here; the output follows the Go reference, which the ADR makes
 the contract.
 
-Deliberate divergence, flagged for the orchestrator: a profile with no
-`Local Storage/leveldb` directory produces no output and exit code 0, where the Go tool prints
-`Error opening LevelDB: ...` and exits 1. `test_cli.py::test_local_storage_mode_dispatches`
-(owned by ticket 01) asserts exit 0 and no output for an empty profile directory, and that test
-was not changed here. Spec user story 24 ("a missing or unreadable database reported as an
-error") is therefore unmet for the missing-directory case and needs a decision.
+Correction (commit `a6c7eab`): a profile with no `Local Storage/leveldb` directory no longer
+produces silent success. It reports the missing directory the way the Go tool does, with
+`Error copying directory: ...` and `Error opening LevelDB: ...` on stdout and exit code 1, so
+spec user story 24 ("a missing or unreadable database reported as an error") is met for the
+missing-directory case. `test_cli.py::test_local_storage_mode_dispatches` builds a profile
+that *has* a leveldb directory and asserts the one dumped record, not silent success.
