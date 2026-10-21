@@ -120,7 +120,10 @@ tool's wording and is still emitted, with an empty `value`.
 **Local storage extraction.** A local storage module reads the profile's local storage LevelDB. It reads
 through the Go tool's approach: the leveldb directory is copied to a temporary directory and opened
 there, because the Python LevelDB binding cannot open a database read-only and must not touch the live
-profile directory. Iteration then handles two key shapes:
+profile directory. The copy is opened normally, so a journal record Chromium has written but not yet
+compacted is replayed. On a running browser the tool reports the newest value for such a key, where the
+Go tool reports the last compacted one; on a closed profile the two agree. Iteration then handles two key
+shapes:
 
 - keys beginning with `_` are records. The key splits on the first NUL byte into a storage key and a
   script key, and the script key is decoded by the same prefix rule as the value.
@@ -134,7 +137,9 @@ both the script key and the value.
 Each record's value is turned into JSON, matching the Go tool's output exactly:
 
 - When the decoded value is itself valid JSON, the value is emitted as raw JSON and the mime is set to
-  the sniffed content type.
+  `application/json`. The value's bytes are emitted unchanged, with only the escaping Go applies, so a
+  value carrying bytes that are not valid UTF-8 produces a line that is not valid UTF-8, matching the Go
+  tool.
 - When it is not, the value is emitted as a quoted string. A value that survives quoting keeps the
   sniffed mime; a value that does not is base64-encoded, quoted, and its mime taken from magic-byte
   matching.
@@ -143,8 +148,9 @@ Each record's value is turned into JSON, matching the Go tool's output exactly:
 
 The sniffed content type comes from a mimesniff library, which implements the same WHATWG algorithm as
 Go's `net/http.DetectContentType`; only the part before the first semicolon is kept. Magic-byte matching
-comes from the `filetype` library, which is the Python port of the `h2non/filetype` library the Go tool
-uses.
+comes from the `filetype` library, the Python port of the `h2non/filetype` library the Go tool uses, with
+an override table mapping the type names whose MIME strings differ between the two ports to the strings
+the Go tool emits.
 
 **Output contract.** One JSON object per line on stdout, in struct order, with no trailing wrapper. Error
 lines go to stdout in the Go tool's wording, not to stderr. The authoritative field sets:
@@ -165,16 +171,18 @@ lines go to stdout in the Go tool's wording, not to stderr. The authoritative fi
 | `conversions` | array of string | names of the transformations applied to the value |
 | `value` | any JSON | the value, emitted as raw JSON |
 
-**Platform guard.** Cookie decryption is macOS-only, matching the Go tool. On other platforms the tool
-reports that it is unsupported rather than producing a wrong decryption.
+**Platform guard.** The tool is macOS-only. On any other platform the command reports that it is
+unsupported and exits non-zero, before either mode runs.
 
-**Dependencies.** LevelDB reading uses `plyvel`, which links the system LevelDB library. On this machine
-`plyvel` builds but fails to import against the Homebrew LevelDB 1.23 dylib, which omits the
-`leveldb::Comparator` typeinfo symbol; building it from source with `CXXFLAGS=-fno-rtti` fixes the
-import, and that build flag is documented for installs. The remaining dependencies are `cryptography`
-for AES-CBC, `mimesniff` for content-type sniffing, `filetype` for magic-byte matching, and `keyring`
-for the keychain. Key derivation, SQLite access, JSON, base64, and argument parsing come from the
-standard library.
+**Dependencies.** LevelDB reading uses `plyvel`, which links the LevelDB library. The LevelDB installed
+by the Intel Homebrew under `/usr/local` is x86_64, and an arm64 Python cannot load it, so LevelDB and
+snappy are built from source for arm64 into private prefixes. snappy is required because Chromium
+compresses its table blocks, and a LevelDB built without it reports a corrupted block instead of reading
+the record. `plyvel` is compiled against both with `CXXFLAGS=-fno-rtti`; leveldb keeps the `Comparator`
+typeinfo hidden, and that flag stops `plyvel` from referring to it. The install steps are documented in
+the README. The remaining dependencies are `cryptography` for AES-CBC, `mimesniff` for content-type
+sniffing, `filetype` for magic-byte matching, and `keyring` for the keychain. Key derivation, SQLite
+access, JSON, base64, and argument parsing come from the standard library.
 
 **Packaging.** `pyproject.toml` in PEP 621 form, dependencies managed with `uv`, package name
 `chromedbpy`, a console-script entry point named `chromedbpy`, and a Python floor of 3.10.

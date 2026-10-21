@@ -4,10 +4,10 @@
 
 **Blocked by:** 01.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A helper builds a temporary profile directory containing a `Cookies` SQLite database and a `Local Storage/leveldb` LevelDB directory.
-- [ ] The helper can set `meta.version` to a chosen value and insert cookie rows carrying encrypted values it produces from the tool's key derivation.
-- [ ] The helper can write local storage `_` records (storage key, script key, value) and `META:` entries.
-- [ ] The helper removes its temporary directory when the fixture is discarded.
-- [ ] Fixture creation is covered by a test that opens the databases back and sees the inserted rows.
+- [x] A helper builds a temporary profile directory containing a `Cookies` SQLite database and a `Local Storage/leveldb` LevelDB directory.
+- [x] The helper can set `meta.version` to a chosen value and insert cookie rows carrying encrypted values it produces from the tool's key derivation.
+- [x] The helper can write local storage `_` records (storage key, script key, value) and `META:` entries.
+- [x] The helper removes its temporary directory when the fixture is discarded.
+- [x] Fixture creation is covered by a test that opens the databases back and sees the inserted rows.

@@ -4,11 +4,11 @@
 
 **Blocked by:** 02.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `-c` reads `name`, `value`, `host_key`, and `encrypted_value` from the Cookies database.
-- [ ] The key is derived as PBKDF2-HMAC-SHA1 over the salt `saltysalt`, 1003 iterations, 16 bytes, with the password trimmed of surrounding whitespace.
-- [ ] `BROWSER_PASSWORD` takes precedence, and the keychain is read when it is unset.
-- [ ] The keychain service is inferred from the profile path, with a fallback that tries the common service names.
-- [ ] Each emitted line carries `domain`, `name`, `encrypted_value`, and `value` with the Go tool's encodings.
-- [ ] A row whose decryption fails is reported in the Go tool's wording and emitted with an empty `value`.
+- [x] `-c` reads `name`, `value`, `host_key`, and `encrypted_value` from the Cookies database.
+- [x] The key is derived as PBKDF2-HMAC-SHA1 over the salt `saltysalt`, 1003 iterations, 16 bytes, with the password trimmed of surrounding whitespace.
+- [x] `BROWSER_PASSWORD` takes precedence, and the keychain is read when it is unset.
+- [x] The keychain service is inferred from the profile path, with a fallback that tries the common service names.
+- [x] Each emitted line carries `domain`, `name`, `encrypted_value`, and `value` with the Go tool's encodings.
+- [x] A row whose decryption fails is reported in the Go tool's wording and emitted with an empty `value`.

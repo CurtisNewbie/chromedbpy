@@ -1,0 +1,1 @@
+"""chromedbpy: read Chromium cookies and local storage from Python."""

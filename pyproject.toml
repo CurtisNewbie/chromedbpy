@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "chromedbpy"
+version = "0.1.0"
+description = "Read Chromium cookies and local storage from Python"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+    "cryptography",
+    "keyring",
+    "mimesniff",
+    "filetype",
+    "plyvel",
+]
+
+[project.scripts]
+chromedbpy = "chromedbpy.cli:main"
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/chromedbpy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
