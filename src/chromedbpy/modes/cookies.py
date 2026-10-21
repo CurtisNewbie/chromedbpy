@@ -15,6 +15,7 @@ stdout in the reference tool's wording and is still emitted with an empty
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 import sqlite3
 
@@ -26,6 +27,7 @@ from chromedbpy.keys import derive_key
 _AES_BLOCK_SIZE = 16
 _AES_IV = b" " * 16
 _V10_PREFIX = b"v10"
+_DOMAIN_DIGEST_SIZE = 32
 
 # The keychain service each browser profile uses, keyed by a marker in the
 # profile's path. The marker is matched case-sensitively, so an unrelated
@@ -128,12 +130,15 @@ def _read_cookies(cookies_path: str) -> tuple[list[tuple], int]:
     return rows, db_version
 
 
-def _decrypt_value(encrypted_value: bytes, key: bytes, db_version: int) -> str:
+def _decrypt_value(
+    encrypted_value: bytes, key: bytes, db_version: int, host_key: str
+) -> str:
     """Decrypt one cookie value, reproducing the reference tool's errors.
 
-    ``db_version`` selects the plaintext layout. Version 24 and above prepend a
-    SHA256 digest of the host key; that branch is added by ticket 04, and every
-    fixture at this stage stays below version 24.
+    ``db_version`` selects the plaintext layout. Version 24 and above (Chrome
+    130+) prepend a SHA256 digest of the host key, which is verified against
+    ``host_key`` and then dropped. The digest is only verified when ``host_key``
+    is non-empty, matching the reference tool.
     """
     if len(encrypted_value) < 3:
         raise _DecryptError("encrypted length less than 3")
@@ -157,7 +162,21 @@ def _decrypt_value(encrypted_value: bytes, key: bytes, db_version: int) -> str:
         raise _DecryptError(
             f"invalid last block padding length: {padding_length}"
         )
-    plaintext = decrypted if padding_length == 0 else decrypted[:-padding_length]
+    end = len(decrypted) - padding_length
+    if db_version >= 24:
+        if len(decrypted) <= _DOMAIN_DIGEST_SIZE:
+            raise _DecryptError(
+                "decrypted data too short for db version "
+                f"{db_version}, expected more than {_DOMAIN_DIGEST_SIZE} bytes "
+                f"but got {len(decrypted)}"
+            )
+        if host_key != "":
+            digest = hashlib.sha256(host_key.encode("utf-8")).digest()
+            if digest != decrypted[:_DOMAIN_DIGEST_SIZE]:
+                raise _DecryptError("domain hash verification failed")
+        plaintext = decrypted[_DOMAIN_DIGEST_SIZE:end]
+    else:
+        plaintext = decrypted[:end]
     return plaintext.decode("utf-8", "replace")
 
 
@@ -235,7 +254,9 @@ def run(profile_path: str) -> int:
         decrypted = value
         if encrypted_value:
             try:
-                decrypted = _decrypt_value(encrypted_value, key, db_version)
+                decrypted = _decrypt_value(
+                    encrypted_value, key, db_version, host_key
+                )
             except _DecryptError as err:
                 print(f"Failed to decrypt cookie {name}: {err}")
                 decrypted = ""
