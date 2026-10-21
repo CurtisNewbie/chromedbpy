@@ -38,76 +38,22 @@ blocks with snappy, so a snappy-less LevelDB cannot read a real profile and
 fails with `Corruption: corrupted compressed block contents`. The snappy build
 on this machine is Intel-only too, so build an arm64 snappy first.
 
-1. Build an arm64 snappy into `~/.local/opt/snappy` (source kept outside this
-   repo):
+On a fresh machine, build both and rebuild `plyvel` against them with one
+idempotent script (the notes above explain why; a fresh machine or a Python /
+architecture change is when this is needed):
 
-   ```bash
-   git clone --depth 1 --branch 1.2.1 https://github.com/google/snappy \
-     ~/.cache/chromedbpy-snappy-src
-   cmake -S ~/.cache/chromedbpy-snappy-src -B ~/.cache/chromedbpy-snappy-src/build \
-     -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
-     -DCMAKE_INSTALL_PREFIX="$HOME/.local/opt/snappy" \
-     -DSNAPPY_BUILD_TESTS=OFF -DSNAPPY_BUILD_BENCHMARKS=OFF
-   cmake --build ~/.cache/chromedbpy-snappy-src/build -j
-   cmake --install ~/.cache/chromedbpy-snappy-src/build
-   ```
+```bash
+scripts/setup-native-deps.sh
+```
 
-2. Build an arm64 LevelDB into `~/.local/opt/leveldb`, pointing CMake at that
-   snappy prefix so leveldb's snappy check succeeds:
+The script is the source of truth for this chain. It encodes the flags that make
+LevelDB's snappy probe succeed (the probe links with the **C** compiler while
+libsnappy is C++, and LevelDB then `#include <snappy.h>`), fails loudly if the
+build silently ends up snappy-less, and verifies the result with a real `plyvel`
+round-trip. Re-running it is a fast no-op.
 
-   ```bash
-   git clone https://github.com/google/leveldb ~/.cache/chromedbpy-leveldb-src
-   git -C ~/.cache/chromedbpy-leveldb-src checkout 1.23
-   cmake -S ~/.cache/chromedbpy-leveldb-src -B ~/.cache/chromedbpy-leveldb-src/build \
-     -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
-     -DBUILD_SHARED_LIBS=OFF \
-     -DLEVELDB_BUILD_TESTS=OFF -DLEVELDB_BUILD_BENCHMARKS=OFF \
-     -DCMAKE_INSTALL_PREFIX="$HOME/.local/opt/leveldb" \
-     -DCMAKE_PREFIX_PATH="$HOME/.local/opt/snappy" \
-     -DCMAKE_C_FLAGS="-I$HOME/.local/opt/snappy/include" \
-     -DCMAKE_CXX_FLAGS="-I$HOME/.local/opt/snappy/include" \
-     -DCMAKE_EXE_LINKER_FLAGS="-L$HOME/.local/opt/snappy/lib -lc++"
-   cmake --build ~/.cache/chromedbpy-leveldb-src/build -j
-   cmake --install ~/.cache/chromedbpy-leveldb-src/build
-   ```
-
-   The two flags that are not obvious both come from leveldb finding snappy:
-
-   - leveldb detects snappy with `check_library_exists(snappy snappy_compress
-     "" HAVE_SNAPPY)`, which links its probe with the **C** compiler. libsnappy
-     is C++, so the probe needs `-lc++` in `CMAKE_EXE_LINKER_FLAGS` or the check
-     silently reports "not found".
-   - once found, leveldb compiles `port/port_stdcxx.h`, which includes
-     `<snappy.h>`, so the snappy include directory must be on the compile line
-     (`CMAKE_C_FLAGS`/`CMAKE_CXX_FLAGS`) — it has no automatic include path for
-     a private prefix.
-
-   Confirm the check took before building on:
-
-   ```bash
-   grep HAVE_SNAPPY ~/.cache/chromedbpy-leveldb-src/build/CMakeCache.txt   # HAVE_SNAPPY:INTERNAL=1
-   nm ~/.local/opt/leveldb/lib/libleveldb.a | grep -c snappy               # > 0
-   ```
-
-3. Rebuild `plyvel` against that prefix. `CXXFLAGS=-fno-rtti` is required:
-   LevelDB builds with RTTI disabled and hidden visibility, so it never exports
-   the `leveldb::Comparator` typeinfo that `plyvel`'s C++ otherwise references.
-   `libleveldb.a` is static and now references snappy, so the plyvel link must
-   also pull in snappy (`-lsnappy`). `uv cache clean plyvel` forces a rebuild.
-
-   ```bash
-   uv cache clean plyvel
-   CFLAGS="-I$HOME/.local/opt/leveldb/include" \
-   CXXFLAGS="-fno-rtti" \
-   LDFLAGS="-L$HOME/.local/opt/leveldb/lib -L$HOME/.local/opt/snappy/lib -lsnappy" \
-   uv sync --reinstall-package plyvel
-   ```
-
-4. Verify with a round-trip:
-
-   ```bash
-   uv run python -c "import plyvel,tempfile,shutil; d=tempfile.mkdtemp(); db=plyvel.DB(d, create_if_missing=True); db.put(b'k',b'v'); assert db.get(b'k')==b'v'; db.close(); shutil.rmtree(d); print('PLYVEL OK')"
-   ```
-
-Because LevelDB is linked statically, `otool -L` on the built `plyvel` extension
-shows only `libc++`/`libSystem` — no `libleveldb` entry.
+It installs snappy into `~/.local/opt/snappy` and LevelDB into
+`~/.local/opt/leveldb`; override with `SNAPPY_PREFIX` / `LEVELDB_PREFIX`. Source
+checkouts live under `$HOME/.cache/chromedbpy-*`, overridable with `SNAPPY_SRC` /
+`LEVELDB_SRC`. Because LevelDB is linked statically, `otool -L` on the built
+`plyvel` extension shows only `libc++`/`libSystem` — no `libleveldb` entry.
