@@ -7,6 +7,7 @@ the implementation computes them.
 
 from __future__ import annotations
 
+import base64
 import json
 import sys
 
@@ -329,3 +330,117 @@ def test_live_profile_leveldb_is_never_opened_for_writing(capsys):
 
     assert exit_code == 0
     assert [json.loads(line)["value"] for line in lines] == ["hello"]
+
+
+def test_binary_value_is_base64_encoded_then_quoted(capsys):
+    # A PNG header cannot survive strconv.Quote as valid JSON, so the Go tool
+    # base64-encodes the bytes and quotes the result, naming both steps.
+    with ProfileFixture() as fixture:
+        fixture.add_record(
+            storage_key="https://example.com",
+            script_key="token",
+            value=b"\x89PNG\r\n\x1a\npayload",
+            charset=1,
+        )
+
+        exit_code, lines = _run(fixture.path, capsys)
+
+    assert exit_code == 0
+    assert lines == [
+        '{"storage_key":"https://example.com","script_key":"token",'
+        '"charset":"ISO-8859-1","mime":"image/png",'
+        '"conversions":["base64.StdEncoding.EncodeToString","strconv.Quote"],'
+        '"value":"iVBORw0KGgpwYXlsb2Fk"}'
+    ]
+
+
+def test_binary_mime_uses_the_go_string_for_a_shared_type(capsys):
+    # ICO: the Python port calls it image/x-icon, the Go tool the
+    # reference binary emits image/vnd.microsoft.icon.
+    with ProfileFixture() as fixture:
+        fixture.add_record(
+            storage_key="https://example.com",
+            script_key="token",
+            value=b"\x00\x00\x01\x00payload",
+            charset=1,
+        )
+
+        exit_code, lines = _run(fixture.path, capsys)
+
+    assert exit_code == 0
+    assert lines == [
+        '{"storage_key":"https://example.com","script_key":"token",'
+        '"charset":"ISO-8859-1","mime":"image/vnd.microsoft.icon",'
+        '"conversions":["base64.StdEncoding.EncodeToString","strconv.Quote"],'
+        '"value":"AAABAHBheWxvYWQ="}'
+    ]
+
+
+def test_binary_mime_is_octet_stream_when_the_go_tool_has_no_matcher(capsys):
+    # Brotli: the Python port recognises it, the Go tool has no matcher, so the
+    # Go tool leaves the application/octet-stream default in place.
+    with ProfileFixture() as fixture:
+        fixture.add_record(
+            storage_key="https://example.com",
+            script_key="token",
+            value=b"\xce\xb2\xcf\x81\x01payload",
+            charset=1,
+        )
+
+        exit_code, lines = _run(fixture.path, capsys)
+
+    assert exit_code == 0
+    assert lines == [
+        '{"storage_key":"https://example.com","script_key":"token",'
+        '"charset":"ISO-8859-1","mime":"application/octet-stream",'
+        '"conversions":["base64.StdEncoding.EncodeToString","strconv.Quote"],'
+        '"value":"zrLPgQFwYXlsb2Fk"}'
+    ]
+
+
+def test_binary_mime_uses_the_go_name_for_a_type_go_recognises_by_another_name(
+    capsys,
+):
+    # HEIC: the Go tool detects the same bytes as image/heif.
+    with ProfileFixture() as fixture:
+        fixture.add_record(
+            storage_key="https://example.com",
+            script_key="token",
+            value=b"\x00\x00\x00\x14ftypheic\x00\x00\x00\x00heic",
+            charset=1,
+        )
+
+        exit_code, lines = _run(fixture.path, capsys)
+
+    assert exit_code == 0
+    assert lines == [
+        '{"storage_key":"https://example.com","script_key":"token",'
+        '"charset":"ISO-8859-1","mime":"image/heif",'
+        '"conversions":["base64.StdEncoding.EncodeToString","strconv.Quote"],'
+        '"value":"AAAAFGZ0eXBoZWljAAAAAGhlaWM="}'
+    ]
+
+
+def test_arbitrary_binary_bytes_still_produce_a_valid_json_line(capsys):
+    payload = bytes(range(256))
+
+    with ProfileFixture() as fixture:
+        fixture.add_record(
+            storage_key="https://example.com",
+            script_key="token",
+            value=payload,
+            charset=1,
+        )
+
+        exit_code, lines = _run(fixture.path, capsys)
+
+    assert exit_code == 0
+    assert len(lines) == 1
+
+    parsed = json.loads(lines[0])
+    assert parsed["mime"] == "application/octet-stream"
+    assert parsed["conversions"] == [
+        "base64.StdEncoding.EncodeToString",
+        "strconv.Quote",
+    ]
+    assert base64.b64decode(parsed["value"]) == payload

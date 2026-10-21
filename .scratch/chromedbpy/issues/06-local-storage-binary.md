@@ -4,9 +4,9 @@
 
 **Blocked by:** 05.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A value that survives JSON quoting is emitted as a quoted string, and one that does not is base64-encoded and then quoted.
-- [ ] A binary value's `mime` comes from magic-byte matching.
-- [ ] `conversions` names the transformations applied, using the same names the Go tool uses.
-- [ ] Output stays valid JSON for a value containing arbitrary bytes.
+- [x] A value that survives JSON quoting is emitted as a quoted string, and one that does not is base64-encoded and then quoted.
+- [x] A binary value's `mime` comes from magic-byte matching.
+- [x] `conversions` names the transformations applied, using the same names the Go tool uses.
+- [x] Output stays valid JSON for a value containing arbitrary bytes.
