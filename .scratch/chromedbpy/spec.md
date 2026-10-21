@@ -120,7 +120,10 @@ tool's wording and is still emitted, with an empty `value`.
 **Local storage extraction.** A local storage module reads the profile's local storage LevelDB. It reads
 through the Go tool's approach: the leveldb directory is copied to a temporary directory and opened
 there, because the Python LevelDB binding cannot open a database read-only and must not touch the live
-profile directory. Iteration then handles two key shapes:
+profile directory. The copy is opened normally, so a journal record Chromium has written but not yet
+compacted is replayed. On a running browser the tool reports the newest value for such a key, where the
+Go tool reports the last compacted one; on a closed profile the two agree. Iteration then handles two key
+shapes:
 
 - keys beginning with `_` are records. The key splits on the first NUL byte into a storage key and a
   script key, and the script key is decoded by the same prefix rule as the value.
@@ -172,13 +175,14 @@ lines go to stdout in the Go tool's wording, not to stderr. The authoritative fi
 unsupported and exits non-zero, before either mode runs.
 
 **Dependencies.** LevelDB reading uses `plyvel`, which links the LevelDB library. The LevelDB installed
-by the Intel Homebrew under `/usr/local` is x86_64, and an arm64 Python cannot load it, so LevelDB is
-built from source for arm64 into a private prefix and `plyvel` is compiled against it with
-`CXXFLAGS=-fno-rtti`; leveldb keeps the `Comparator` typeinfo hidden, and that flag stops `plyvel` from
-referring to it. The install steps are documented in the README. The remaining dependencies are `cryptography`
-for AES-CBC, `mimesniff` for content-type sniffing, `filetype` for magic-byte matching, and `keyring`
-for the keychain. Key derivation, SQLite access, JSON, base64, and argument parsing come from the
-standard library.
+by the Intel Homebrew under `/usr/local` is x86_64, and an arm64 Python cannot load it, so LevelDB and
+snappy are built from source for arm64 into private prefixes. snappy is required because Chromium
+compresses its table blocks, and a LevelDB built without it reports a corrupted block instead of reading
+the record. `plyvel` is compiled against both with `CXXFLAGS=-fno-rtti`; leveldb keeps the `Comparator`
+typeinfo hidden, and that flag stops `plyvel` from referring to it. The install steps are documented in
+the README. The remaining dependencies are `cryptography` for AES-CBC, `mimesniff` for content-type
+sniffing, `filetype` for magic-byte matching, and `keyring` for the keychain. Key derivation, SQLite
+access, JSON, base64, and argument parsing come from the standard library.
 
 **Packaging.** `pyproject.toml` in PEP 621 form, dependencies managed with `uv`, package name
 `chromedbpy`, a console-script entry point named `chromedbpy`, and a Python floor of 3.10.

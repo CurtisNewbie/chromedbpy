@@ -312,9 +312,9 @@ def test_real_profile_local_storage_matches_go(go_chromedb):
     Skipped unless ``CHROMEDBPY_REAL_PROFILE`` names a profile directory, so the
     suite stays hermetic; set it locally to check a real profile. Both tools
     copy the LevelDB directory before reading it, so a running Chrome is safe,
-    but a live write-ahead log (``.log``) can make a line or two differ: the
-    two LevelDB implementations disagree on replaying an unflushed log record.
-    Quit Chrome for a byte-exact comparison.
+    but a live write-ahead log (``.log``) can make a line or two differ: this
+    tool replays an unflushed log record, so it reports a newer value than the
+    Go tool, which ignores that record. Quit Chrome for a byte-exact comparison.
     """
     profile = os.environ.get("CHROMEDBPY_REAL_PROFILE")
     if not profile:
