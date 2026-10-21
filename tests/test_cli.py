@@ -7,12 +7,15 @@ import sys
 import pytest
 
 from chromedbpy.cli import main
+from profile_fixture import ProfileFixture
 
 
 def test_cookies_mode_dispatches(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setenv("BROWSER_PASSWORD", "correct horse battery staple")
 
-    exit_code = main(["-p", str(tmp_path), "-c"])
+    with ProfileFixture(password="correct horse battery staple") as fixture:
+        exit_code = main(["-p", str(fixture.path), "-c"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
