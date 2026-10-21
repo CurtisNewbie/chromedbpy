@@ -22,14 +22,22 @@ def test_cookies_mode_dispatches(tmp_path, monkeypatch, capsys):
     assert captured.out == ""
 
 
-def test_local_storage_mode_dispatches(tmp_path, monkeypatch, capsys):
+def test_local_storage_mode_dispatches(monkeypatch, capsys):
     monkeypatch.setattr(sys, "platform", "darwin")
 
-    exit_code = main(["-p", str(tmp_path), "-ls"])
+    with ProfileFixture() as fixture:
+        fixture.add_record(
+            storage_key="https://example.com", script_key="token", value="hello"
+        )
+        exit_code = main(["-p", str(fixture.path), "-ls"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert captured.out == ""
+    assert captured.out.splitlines() == [
+        '{"storage_key":"https://example.com","script_key":"token",'
+        '"charset":"UTF-16-LE","mime":"text/plain",'
+        '"conversions":["strconv.Quote"],"value":"hello"}'
+    ]
 
 
 def test_no_mode_prints_usage_and_fails(tmp_path, capsys):

@@ -302,6 +302,17 @@ def test_unknown_charset_prefix_is_reported_as_an_error(capsys):
     ]
 
 
+def test_missing_leveldb_directory_is_reported(tmp_path, capsys):
+    exit_code, lines = _run(tmp_path, capsys)
+
+    leveldb_path = tmp_path / "Local Storage" / "leveldb"
+    assert exit_code == 1
+    assert lines == [
+        f"Error copying directory: lstat {leveldb_path}: no such file or directory",
+        f"Error opening LevelDB: lstat {leveldb_path}: no such file or directory",
+    ]
+
+
 def test_live_profile_leveldb_is_never_opened_for_writing(capsys):
     with ProfileFixture() as fixture:
         fixture.add_record(

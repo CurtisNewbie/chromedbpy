@@ -5,7 +5,7 @@ there, because the Python binding cannot open a database read-only and the live
 profile must never be opened for writing.
 
 The output contract is the Go reference tool's, quirks included (see
-``docs/adr/0001-faithful-parity-with-go-chromedb.md``). Three of those quirks
+``docs/adr/0001-faithful-parity-with-go-chromedb.md``). Four of those quirks
 shape this module:
 
 - Values are converted the way Go's ``strconv.Quote`` and ``encoding/json``
@@ -16,6 +16,9 @@ shape this module:
   immediately overwritten by the sniffed content type.
 - A JSON number the Go decoder cannot turn into a float64 is emitted as a
   string instead of a number.
+- A leveldb directory that cannot be walked is reported twice: once where the
+  Go tool copies the directory and again as the LevelDB open error that ends
+  the mode.
 """
 
 from __future__ import annotations
@@ -23,7 +26,9 @@ from __future__ import annotations
 import base64
 import json
 import math
+import os
 import shutil
+import stat
 import tempfile
 import unicodedata
 from dataclasses import dataclass
@@ -50,6 +55,15 @@ _JSON_WHITESPACE = frozenset(b" \t\n\r")
 
 class LocalStorageError(Exception):
     """A local storage read that failed, worded the way the Go tool words it."""
+
+
+class _DirectoryCopyError(Exception):
+    """The leveldb directory could not be walked.
+
+    The Go tool prints this error on its own when copying the directory and
+    again as the LevelDB open error that ends the mode; the wording carries the
+    OS error, so the message is built exactly where the walk fails.
+    """
 
 
 @dataclass(frozen=True)
@@ -171,18 +185,57 @@ def _record_from_entry(key: bytes, value: bytes) -> _Record | None:
     )
 
 
+def _os_error_text(exc: OSError) -> str:
+    """Word an OS error the way Go's ``syscall.Errno`` words it.
+
+    Go's syscall errors read lowercase (``no such file or directory``);
+    Python capitalizes the platform's message.
+    """
+    if exc.strerror is None:
+        return str(exc)
+    return exc.strerror.lower()
+
+
+def _copy_leveldb(leveldb_dir: Path, target: Path) -> None:
+    """Copy the source directory's files into ``target`` the way the Go tool does.
+
+    The Go tool walks the source directory to copy the LevelDB files it finds.
+    A path it cannot stat aborts that walk with ``lstat <path>: <reason>`` and
+    a directory it cannot list aborts it with ``open <path>: <reason>``. A
+    source that is not a directory is a single file with no LevelDB files to
+    copy, which the Go tool walks past without error.
+    """
+    try:
+        info = os.lstat(leveldb_dir)
+    except OSError as exc:
+        raise _DirectoryCopyError(
+            f"lstat {leveldb_dir}: {_os_error_text(exc)}"
+        ) from exc
+
+    if not stat.S_ISDIR(info.st_mode):
+        return
+
+    try:
+        names = os.listdir(leveldb_dir)
+    except OSError as exc:
+        raise _DirectoryCopyError(
+            f"open {leveldb_dir}: {_os_error_text(exc)}"
+        ) from exc
+
+    for name in names:
+        source = leveldb_dir / name
+        if source.is_file():
+            # Copy contents only: the live directory's permissions say nothing
+            # about what the copy needs, and the copy is opened for writing.
+            shutil.copyfile(source, target / name)
+
+
 def _load_records(leveldb_dir: Path) -> list[_Record]:
     """Read every record from a copy of ``leveldb_dir``, in key order."""
     with tempfile.TemporaryDirectory(prefix="chromedbpy-leveldb-") as tmp:
         target = Path(tmp) / "leveldb"
         target.mkdir()
-        if leveldb_dir.is_dir():
-            for entry in leveldb_dir.iterdir():
-                if entry.is_file():
-                    # Copy contents only: the live directory's permissions say
-                    # nothing about what the copy needs, and the copy is opened
-                    # for writing.
-                    shutil.copyfile(entry, target / entry.name)
+        _copy_leveldb(leveldb_dir, target)
 
         records: list[_Record] = []
         with plyvel.DB(str(target), create_if_missing=True) as db:
@@ -480,6 +533,12 @@ def run(profile_path: str) -> int:
 
     try:
         records = _load_records(leveldb_dir)
+    except _DirectoryCopyError as exc:
+        # The Go tool prints the failing walk once where it copies and again as
+        # the LevelDB open error that ends the mode.
+        print(f"Error copying directory: {exc}")
+        print(f"Error opening LevelDB: {exc}")
+        return 1
     except (LocalStorageError, plyvel.Error, OSError) as exc:
         print(f"Error opening LevelDB: {exc}")
         return 1
