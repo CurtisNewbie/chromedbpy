@@ -12,6 +12,10 @@ The fixture still excludes two divergences that are out of this check's scope:
 
 - ``deb`` magic bytes (the Go detector is non-deterministic across runs);
 - an ``avif`` sample whose ``ftyp`` box length is ``0x14``.
+
+An additional real-profile differential is available opt-in: set
+``CHROMEDBPY_REAL_PROFILE`` to a Chromium profile directory to enable it (it is
+skipped by default so the suite stays hermetic).
 """
 
 from __future__ import annotations
@@ -84,6 +88,14 @@ _LOCAL_STORAGE_RECORDS = [
     ("https://a.test", "json str", '"already a string"', 0),
     ("https://a.test", "html", "<b>&amp;</b>", 0),
     ("https://a.test", "empty", "", 0),
+    # A large, highly repetitive value. LevelDB only compresses a block when it
+    # shrinks below ~12.5%, so this forces the data block onto disk with the
+    # SNAPPY compression type (block trailer byte 1). Reading it back exercises
+    # the snappy decompression path: a LevelDB built without libsnappy fails
+    # here with "corrupted compressed block contents", the bug this record
+    # guards against. Chrome always compresses, so the same path is used for a
+    # real profile.
+    ("https://a.test", "big snappy", b"A" * 8192, 1),
     # Valid JSON whose strings hold invalid UTF-8: Go emits the raw bytes, so
     # this line is itself invalid UTF-8 and is compared as raw stdout bytes.
     ("https://a.test", "json bad utf8", b'{"a":"\xff\xfe"}', 1),
@@ -290,5 +302,28 @@ def test_local_storage_output_matches_go(go_chromedb):
 
         go = _run_go(go_chromedb, "-ls", fixture.path)
         py = _run_python("-ls", fixture.path)
+
+    _assert_same_output(go, py)
+
+
+def test_real_profile_local_storage_matches_go(go_chromedb):
+    """Differential check against a real Chromium profile, opt-in.
+
+    Skipped unless ``CHROMEDBPY_REAL_PROFILE`` names a profile directory, so the
+    suite stays hermetic; set it locally to check a real profile. Both tools
+    copy the LevelDB directory before reading it, so a running Chrome is safe,
+    but a live write-ahead log (``.log``) can make a line or two differ: the
+    two LevelDB implementations disagree on replaying an unflushed log record.
+    Quit Chrome for a byte-exact comparison.
+    """
+    profile = os.environ.get("CHROMEDBPY_REAL_PROFILE")
+    if not profile:
+        pytest.skip("CHROMEDBPY_REAL_PROFILE is not set")
+    path = Path(profile).expanduser()
+    if not path.is_dir():
+        pytest.skip(f"CHROMEDBPY_REAL_PROFILE is not a directory: {path}")
+
+    go = _run_go(go_chromedb, "-ls", path)
+    py = _run_python("-ls", path)
 
     _assert_same_output(go, py)
