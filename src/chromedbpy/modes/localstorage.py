@@ -45,6 +45,38 @@ _SEPARATOR = b"\x00"
 _DEFAULT_MIME = "application/octet-stream"
 _JSON_MIME = "application/json"
 
+# The Python `filetype` package and the Go `h2non/filetype` library the
+# reference tool vendors are ports of one another but not the same type table.
+# Six matchers are shared yet spell their MIME differently, a handful of types
+# exist in only one of the two libraries, and Go recognises a few images under
+# a broader neighbouring type. The Go tool's output is the contract, so its
+# answer is restored here, keyed by the Python port's file extension, instead
+# of scattering special cases or patching the library.
+_GO_MIME_OVERRIDES = {
+    # Same magic-byte matcher, different MIME string in the two ports.
+    "exe": "application/vnd.microsoft.portable-executable",
+    "ico": "image/vnd.microsoft.icon",
+    "m4a": "audio/m4a",
+    "rar": "application/vnd.rar",
+    "sqlite": "application/vnd.sqlite3",
+    # Go matches the same bytes as a neighbouring, more broadly named type.
+    "heic": "image/heif",
+    "apng": "image/png",
+    "odt": "application/zip",
+    "ods": "application/zip",
+    "odp": "application/zip",
+    # Python has a matcher Go lacks, so the Go tool keeps the default. (The Go
+    # tool's own Debian type is nondeterministic: its archive matchers iterate a
+    # map, so the same bytes come out as either the Debian or the `ar` string.)
+    "deb": "application/vnd.debian.binary-package",
+    "avif": _DEFAULT_MIME,
+    "br": _DEFAULT_MIME,
+    "jpx": _DEFAULT_MIME,
+    "lz4": _DEFAULT_MIME,
+    "lzo": _DEFAULT_MIME,
+    "xcf": _DEFAULT_MIME,
+}
+
 # The names of the transformations, spelled the way the Go tool puts them in
 # the `conversions` array (they name internal Go calls).
 _QUOTE_CONVERSION = "strconv.Quote"
@@ -378,6 +410,14 @@ def _overflows_float64(literal: _NumberLiteral) -> bool:
     return math.isinf(value)
 
 
+def _magic_mime(raw: bytes) -> str:
+    """Match magic bytes and answer with the MIME string the Go tool reports."""
+    magic = filetype.match(raw)
+    if magic is None:
+        return _DEFAULT_MIME
+    return _GO_MIME_OVERRIDES.get(magic.extension, magic.mime)
+
+
 def _convert_value(record: _Record) -> tuple[str, list[str], bytes]:
     """Return ``(mime, conversions, value fragment)`` for a record's value."""
     raw = record.value
@@ -398,11 +438,11 @@ def _convert_value(record: _Record) -> tuple[str, list[str], bytes]:
         return mime, [_QUOTE_CONVERSION], quoted.encode("utf-8")
 
     encoded = base64.standard_b64encode(raw).decode("ascii")
-    magic = filetype.match(raw)
-    mime = magic.mime if magic is not None else _DEFAULT_MIME
-    return mime, [_BASE64_CONVERSION, _QUOTE_CONVERSION], _go_quote(
-        encoded.encode("utf-8")
-    ).encode("utf-8")
+    return (
+        _magic_mime(raw),
+        [_BASE64_CONVERSION, _QUOTE_CONVERSION],
+        _go_quote(encoded.encode("utf-8")).encode("utf-8"),
+    )
 
 
 # --- Writing the line ------------------------------------------------------
