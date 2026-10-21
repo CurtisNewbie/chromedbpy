@@ -134,7 +134,9 @@ both the script key and the value.
 Each record's value is turned into JSON, matching the Go tool's output exactly:
 
 - When the decoded value is itself valid JSON, the value is emitted as raw JSON and the mime is set to
-  `application/json`.
+  `application/json`. The value's bytes are emitted unchanged, with only the escaping Go applies, so a
+  value carrying bytes that are not valid UTF-8 produces a line that is not valid UTF-8, matching the Go
+  tool.
 - When it is not, the value is emitted as a quoted string. A value that survives quoting keeps the
   sniffed mime; a value that does not is base64-encoded, quoted, and its mime taken from magic-byte
   matching.
@@ -143,8 +145,9 @@ Each record's value is turned into JSON, matching the Go tool's output exactly:
 
 The sniffed content type comes from a mimesniff library, which implements the same WHATWG algorithm as
 Go's `net/http.DetectContentType`; only the part before the first semicolon is kept. Magic-byte matching
-comes from the `filetype` library, which is the Python port of the `h2non/filetype` library the Go tool
-uses.
+comes from the `filetype` library, the Python port of the `h2non/filetype` library the Go tool uses, with
+an override table mapping the type names whose MIME strings differ between the two ports to the strings
+the Go tool emits.
 
 **Output contract.** One JSON object per line on stdout, in struct order, with no trailing wrapper. Error
 lines go to stdout in the Go tool's wording, not to stderr. The authoritative field sets:
@@ -165,8 +168,8 @@ lines go to stdout in the Go tool's wording, not to stderr. The authoritative fi
 | `conversions` | array of string | names of the transformations applied to the value |
 | `value` | any JSON | the value, emitted as raw JSON |
 
-**Platform guard.** The tool is macOS-only, matching the Go tool. On any other platform the command
-reports that it is unsupported and exits non-zero, before either mode runs.
+**Platform guard.** The tool is macOS-only. On any other platform the command reports that it is
+unsupported and exits non-zero, before either mode runs.
 
 **Dependencies.** LevelDB reading uses `plyvel`, which links the LevelDB library. The LevelDB installed
 by the Intel Homebrew under `/usr/local` is x86_64, and an arm64 Python cannot load it, so LevelDB is
