@@ -4,9 +4,9 @@
 
 **Blocked by:** 03.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The tool reads `meta.version`, defaulting to 0 when the value cannot be read.
-- [ ] When the version is 24 or higher, the first 32 decrypted bytes are compared with `SHA256(host_key)` and dropped.
-- [ ] A digest mismatch is reported as an error rather than returned as a value.
-- [ ] Cookies dumped from a fixture at version 24 carry the same `value` as the same cookies at an older version.
+- [x] The tool reads `meta.version`, defaulting to 0 when the value cannot be read.
+- [x] When the version is 24 or higher, the first 32 decrypted bytes are compared with `SHA256(host_key)` and dropped.
+- [x] A digest mismatch is reported as an error rather than returned as a value.
+- [x] Cookies dumped from a fixture at version 24 carry the same `value` as the same cookies at an older version.

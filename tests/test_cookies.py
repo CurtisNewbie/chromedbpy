@@ -215,6 +215,107 @@ def test_plaintext_cookie_keeps_the_database_value(
     assert cookie["encrypted_value"] == ""
 
 
+def test_version_24_cookie_is_decrypted_with_the_domain_digest_dropped(
+    tmp_path, monkeypatch, capsys
+):
+    with ProfileFixture(password=PASSWORD, version=24) as fixture:
+        fixture.add_cookie(
+            name="sid", value="secret-session", host_key="example.com"
+        )
+        exit_code, lines = _run_cookies(fixture.path, monkeypatch, capsys)
+
+    assert exit_code == 0
+    assert len(lines) == 1
+    cookie = json.loads(lines[0])
+    assert cookie["domain"] == "example.com"
+    assert cookie["name"] == "sid"
+    assert cookie["value"] == "secret-session"
+
+
+def test_version_24_value_matches_the_older_version(
+    tmp_path, monkeypatch, capsys
+):
+    cases = [
+        ("sid", "abc123", "example.com"),
+        ("uni", "caf\u00e9 \u4e2d\u6587", "example.com"),
+        ("host<", "v", "ho<st>&.example.com"),
+        ("empty", "", "example.com"),
+    ]
+
+    def dump(version):
+        with ProfileFixture(password=PASSWORD, version=version) as fixture:
+            for name, value, host in cases:
+                fixture.add_cookie(name=name, value=value, host_key=host)
+            _, lines = _run_cookies(fixture.path, monkeypatch, capsys)
+        return [json.loads(line)["value"] for line in lines]
+
+    assert dump(24) == dump(18)
+
+
+def test_version_24_domain_hash_mismatch_is_reported(
+    tmp_path, monkeypatch, capsys
+):
+    with ProfileFixture(password=PASSWORD, version=24) as fixture:
+        encrypted = fixture.encrypt(b"secret-session", host_key="evil.com")
+        with sqlite3.connect(fixture.path / "Cookies") as conn:
+            conn.execute(
+                "INSERT INTO cookies (name, value, host_key, encrypted_value)"
+                " VALUES (?, ?, ?, ?)",
+                ("sid", "", "example.com", encrypted),
+            )
+            conn.commit()
+        exit_code, lines = _run_cookies(fixture.path, monkeypatch, capsys)
+
+    assert exit_code == 0
+    assert lines[0] == (
+        "Failed to decrypt cookie sid: domain hash verification failed"
+    )
+    cookie = json.loads(lines[1])
+    assert cookie["name"] == "sid"
+    assert cookie["value"] == ""
+
+
+def test_version_24_short_payload_is_reported(tmp_path, monkeypatch, capsys):
+    with ProfileFixture(password=PASSWORD, version=18) as fixture:
+        short = fixture.encrypt(b"")
+        fixture.set_version(24)
+        with sqlite3.connect(fixture.path / "Cookies") as conn:
+            conn.execute(
+                "INSERT INTO cookies (name, value, host_key, encrypted_value)"
+                " VALUES (?, ?, ?, ?)",
+                ("short", "", "example.com", short),
+            )
+            conn.commit()
+        exit_code, lines = _run_cookies(fixture.path, monkeypatch, capsys)
+
+    assert exit_code == 0
+    assert lines[0] == (
+        "Failed to decrypt cookie short: decrypted data too short for db"
+        " version 24, expected more than 32 bytes but got 16"
+    )
+    assert json.loads(lines[1])["value"] == ""
+
+
+def test_version_24_empty_domain_skips_the_hash_check(
+    tmp_path, monkeypatch, capsys
+):
+    with ProfileFixture(password=PASSWORD, version=24) as fixture:
+        encrypted = fixture.encrypt(b"secret-session", host_key="evil.com")
+        with sqlite3.connect(fixture.path / "Cookies") as conn:
+            conn.execute(
+                "INSERT INTO cookies (name, value, host_key, encrypted_value)"
+                " VALUES (?, ?, ?, ?)",
+                ("sid", "", "", encrypted),
+            )
+            conn.commit()
+        exit_code, lines = _run_cookies(fixture.path, monkeypatch, capsys)
+
+    assert exit_code == 0
+    cookie = json.loads(lines[0])
+    assert cookie["name"] == "sid"
+    assert cookie["value"] == "secret-session"
+
+
 def test_missing_cookies_database_is_reported(tmp_path, monkeypatch, capsys):
     exit_code, lines = _run_cookies(tmp_path, monkeypatch, capsys)
 
