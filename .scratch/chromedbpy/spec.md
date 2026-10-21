@@ -134,7 +134,7 @@ both the script key and the value.
 Each record's value is turned into JSON, matching the Go tool's output exactly:
 
 - When the decoded value is itself valid JSON, the value is emitted as raw JSON and the mime is set to
-  the sniffed content type.
+  `application/json`.
 - When it is not, the value is emitted as a quoted string. A value that survives quoting keeps the
   sniffed mime; a value that does not is base64-encoded, quoted, and its mime taken from magic-byte
   matching.
