@@ -165,8 +165,8 @@ lines go to stdout in the Go tool's wording, not to stderr. The authoritative fi
 | `conversions` | array of string | names of the transformations applied to the value |
 | `value` | any JSON | the value, emitted as raw JSON |
 
-**Platform guard.** Cookie decryption is macOS-only, matching the Go tool. On other platforms the tool
-reports that it is unsupported rather than producing a wrong decryption.
+**Platform guard.** The tool is macOS-only, matching the Go tool. On any other platform the command
+reports that it is unsupported and exits non-zero, before either mode runs.
 
 **Dependencies.** LevelDB reading uses `plyvel`, which links the system LevelDB library. On this machine
 `plyvel` builds but fails to import against the Homebrew LevelDB 1.23 dylib, which omits the
