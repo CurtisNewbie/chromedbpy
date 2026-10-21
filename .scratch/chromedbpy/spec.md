@@ -168,10 +168,11 @@ lines go to stdout in the Go tool's wording, not to stderr. The authoritative fi
 **Platform guard.** The tool is macOS-only, matching the Go tool. On any other platform the command
 reports that it is unsupported and exits non-zero, before either mode runs.
 
-**Dependencies.** LevelDB reading uses `plyvel`, which links the system LevelDB library. On this machine
-`plyvel` builds but fails to import against the Homebrew LevelDB 1.23 dylib, which omits the
-`leveldb::Comparator` typeinfo symbol; building it from source with `CXXFLAGS=-fno-rtti` fixes the
-import, and that build flag is documented for installs. The remaining dependencies are `cryptography`
+**Dependencies.** LevelDB reading uses `plyvel`, which links the LevelDB library. The LevelDB installed
+by the Intel Homebrew under `/usr/local` is x86_64, and an arm64 Python cannot load it, so LevelDB is
+built from source for arm64 into a private prefix and `plyvel` is compiled against it with
+`CXXFLAGS=-fno-rtti`; leveldb keeps the `Comparator` typeinfo hidden, and that flag stops `plyvel` from
+referring to it. The install steps are documented in the README. The remaining dependencies are `cryptography`
 for AES-CBC, `mimesniff` for content-type sniffing, `filetype` for magic-byte matching, and `keyring`
 for the keychain. Key derivation, SQLite access, JSON, base64, and argument parsing come from the
 standard library.
