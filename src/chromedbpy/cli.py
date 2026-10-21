@@ -63,10 +63,11 @@ def main(argv: list[str] | None = None) -> int:
         _print_usage()
         return 1
 
+    if not _is_macos():
+        print(f"Error: {PROGRAM} is only supported on macOS")
+        return 1
+
     if args.cookies:
-        if not _is_macos():
-            print("Error: cookie decryption is only supported on macOS")
-            return 1
         return cookies_mode.run(args.profile)
 
     return localstorage_mode.run(args.profile)

@@ -10,5 +10,5 @@
 - [x] `chromedbpy -p <dir> -c` and `chromedbpy -p <dir> -ls` each parse and dispatch to their mode.
 - [x] Supplying no mode, or both modes, prints usage and exits non-zero.
 - [x] Omitting the profile path prints usage and exits non-zero.
-- [x] On a non-macOS platform the command reports the feature as unsupported and exits non-zero; covered by a test that simulates another platform.
+- [x] On a non-macOS platform the whole command is refused: both `-c` and `-ls` report the feature as unsupported and exit non-zero; covered by a test that simulates another platform.
 - [x] A test drives the command line entry point in-process and asserts on stdout and the exit code.

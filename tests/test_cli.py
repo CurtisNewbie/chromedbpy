@@ -19,7 +19,9 @@ def test_cookies_mode_dispatches(tmp_path, monkeypatch, capsys):
     assert captured.out == ""
 
 
-def test_local_storage_mode_dispatches(tmp_path, capsys):
+def test_local_storage_mode_dispatches(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "platform", "darwin")
+
     exit_code = main(["-p", str(tmp_path), "-ls"])
 
     captured = capsys.readouterr()
@@ -55,10 +57,11 @@ def test_missing_profile_path_prints_usage_and_fails(capsys):
     assert "Usage of chromedbpy" in captured.out
 
 
-def test_non_macos_platform_is_unsupported(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("mode", ["-c", "-ls"])
+def test_non_macos_platform_is_unsupported(tmp_path, monkeypatch, capsys, mode):
     monkeypatch.setattr(sys, "platform", "linux")
 
-    exit_code = main(["-p", str(tmp_path), "-c"])
+    exit_code = main(["-p", str(tmp_path), mode])
 
     captured = capsys.readouterr()
     assert exit_code != 0
