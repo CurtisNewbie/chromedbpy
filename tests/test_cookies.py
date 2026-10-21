@@ -152,12 +152,14 @@ def test_control_characters_use_go_short_and_long_escapes(
     with ProfileFixture(password=PASSWORD, version=18) as fixture:
         fixture.add_cookie(
             name="raw",
-            value="a\tb\nc\x08d",
+            value="a\tb\nc\x08d\x0ce\x01f",
             host_key="example.com",
         )
         _, lines = _run_cookies(fixture.path, monkeypatch, capsys)
 
-    assert '"value":"a\\tb\\nc\\u0008d"' in lines[0]
+    assert '"value":"a\\tb\\nc\\bd\\fe\\u0001f"' in lines[0]
+    assert "\\u0008" not in lines[0]
+    assert "\\u000c" not in lines[0]
 
 
 @pytest.mark.parametrize(

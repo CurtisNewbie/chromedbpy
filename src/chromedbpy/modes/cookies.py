@@ -179,6 +179,10 @@ def _json_string(value: str) -> str:
             out.append("\\r")
         elif character == "\t":
             out.append("\\t")
+        elif character == "\b":
+            out.append("\\b")
+        elif character == "\f":
+            out.append("\\f")
         elif character < " ":
             out.append("\\u%04x" % ord(character))
         elif character == "<":
