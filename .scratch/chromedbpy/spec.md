@@ -171,6 +171,20 @@ lines go to stdout in the Go tool's wording, not to stderr. The authoritative fi
 | `conversions` | array of string | names of the transformations applied to the value |
 | `value` | any JSON | the value, emitted as raw JSON |
 
+**Library API.** A consumer can read a profile without a subprocess or JSON parsing. The module
+`chromedbpy.api` exposes exactly two functions, re-exported from the package root:
+
+| function | returns |
+|---|---|
+| `read_local_storage(profile_path)` | `list[dict]`, one per record, keys `storage_key`, `script_key`, `charset`, `mime`, `conversions`, `value`; `value` is the JSON-decoded value |
+| `read_cookies(profile_path)` | `list[dict]`, one per row, keys `domain`, `name`, `encrypted_value`, `value`; `encrypted_value` is the base64 string or `None` for a NULL column |
+
+Both reuse the mode internals rather than reimplementing them, so the records carry the same field
+names, meanings, and value encodings the CLI emits. The error contract differs from the command line:
+the CLI prints an error line on stdout and returns an exit code, while these functions never print and
+instead raise, propagating the existing exceptions (`localstorage.LocalStorageError`, `leveldb.Error`,
+`OSError`, `sqlite3.Error`). A missing storage password raises `RuntimeError`.
+
 **Platform guard.** The tool is macOS-only. On any other platform the command reports that it is
 unsupported and exits non-zero, before either mode runs.
 
@@ -225,8 +239,6 @@ behaviour, then make it pass.
 - Session storage. The Go tool's `-ss` mode is not ported and no flag is provided for it.
 - Cookie decryption on Linux and Windows. Only the macOS key derivation is implemented.
 - Domain filtering. The Go tool has it commented out, and this port does not add it.
-- A supported Python library surface. The package ships a command line tool; the internal modules are
-  not a public API and carry no compatibility promise.
 - Any browser other than Chromium-based ones.
 - Fixing the Go tool's output quirks. They are reproduced on purpose, as recorded in the parity ADR.
 

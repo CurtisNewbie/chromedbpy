@@ -48,3 +48,15 @@ chromedbpy -p <profile-dir> -ls   # local storage
 ```
 
 `-p` is required and exactly one of `-c` or `-ls` must be given.
+
+## Library usage
+
+```python
+from chromedbpy import read_cookies, read_local_storage
+
+cookies = read_cookies("/path/to/profile")       # list[dict]
+records = read_local_storage("/path/to/profile")  # list[dict]
+```
+
+Each dict holds the same fields the CLI prints, with values already decoded.
+Unlike the CLI, these functions raise instead of printing on error.
