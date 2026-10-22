@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import sqlite3
 
-import plyvel
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+from chromedbpy import leveldb
 from profile_fixture import ProfileFixture
 
 PASSWORD = "correct horse battery staple"
@@ -90,7 +90,7 @@ def test_fixture_writes_local_storage_records_and_meta():
             size=5,
         )
 
-        db = plyvel.DB(str(fixture.path / "Local Storage" / "leveldb"))
+        db = leveldb.DB(str(fixture.path / "Local Storage" / "leveldb"))
         try:
             items = dict(db)
         finally:

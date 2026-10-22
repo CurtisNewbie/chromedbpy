@@ -14,10 +14,10 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-import plyvel
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+from chromedbpy import leveldb
 from chromedbpy.keys import derive_key
 
 # Cookie value encryption: the macOS Chrome scheme the tool decrypts. Fixture
@@ -100,7 +100,7 @@ class ProfileFixture:
 
         self._leveldb = self._root / "Local Storage" / "leveldb"
         self._leveldb.mkdir(parents=True)
-        plyvel.DB(str(self._leveldb), create_if_missing=True).close()
+        leveldb.DB(str(self._leveldb), create_if_missing=True).close()
 
     def set_version(self, version: int) -> None:
         """Set ``meta.version`` and use it for later cookie encryption."""
@@ -140,9 +140,9 @@ class ProfileFixture:
         """Write one LevelDB entry, opening and closing the database around it.
 
         The database is closed between writes so a test can reopen it (a live
-        ``plyvel`` handle holds a lock).
+        ``leveldb`` handle holds a lock).
         """
-        db = plyvel.DB(str(self._leveldb), create_if_missing=True)
+        db = leveldb.DB(str(self._leveldb), create_if_missing=True)
         try:
             db.put(key, value)
         finally:
