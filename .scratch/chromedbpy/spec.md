@@ -174,18 +174,20 @@ lines go to stdout in the Go tool's wording, not to stderr. The authoritative fi
 **Platform guard.** The tool is macOS-only. On any other platform the command reports that it is
 unsupported and exits non-zero, before either mode runs.
 
-**Dependencies.** LevelDB reading uses `plyvel`, which links the LevelDB library. The LevelDB installed
-by the Intel Homebrew under `/usr/local` is x86_64, and an arm64 Python cannot load it, so LevelDB and
-snappy are built from source for arm64 into private prefixes. snappy is required because Chromium
-compresses its table blocks, and a LevelDB built without it reports a corrupted block instead of reading
-the record. `plyvel` is compiled against both with `CXXFLAGS=-fno-rtti`; leveldb keeps the `Comparator`
-typeinfo hidden, and that flag stops `plyvel` from referring to it. The install steps are documented in
-the README. The remaining dependencies are `cryptography` for AES-CBC, `mimesniff` for content-type
-sniffing, `filetype` for magic-byte matching, and `keyring` for the keychain. Key derivation, SQLite
-access, JSON, base64, and argument parsing come from the standard library.
+**Dependencies.** LevelDB reading uses `plyvel`, taken from a maintained fork whose wheel bundles its own
+LevelDB and snappy, so the package installs with no compiler and no system library. A bundled LevelDB
+rather than a system one is what makes the read work here: the LevelDB that Homebrew installs is x86_64
+and an arm64 Python cannot load it, and Chromium's table blocks are snappy-compressed, so that build has
+to include snappy or it reports a corrupted block instead of the record. The two forks split by Python
+version, `plyvel-ci` covering 3.10 and 3.11 and `plyvel-next` covering 3.12 through 3.14, and both expose
+the binding the code uses. The remaining dependencies are `cryptography` for AES-CBC, `mimesniff` for
+content-type sniffing, `filetype` for magic-byte matching, and `keyring` for the keychain. Key
+derivation, SQLite access, JSON, base64, and argument parsing come from the standard library.
 
 **Packaging.** `pyproject.toml` in PEP 621 form, dependencies managed with `uv`, package name
-`chromedbpy`, a console-script entry point named `chromedbpy`, and a Python floor of 3.10.
+`chromedbpy`, a console-script entry point named `chromedbpy`, and a supported Python range of 3.10
+through 3.14. The built wheel carries no native code of its own; every native part arrives in a
+dependency's wheel.
 
 **Independent implementation.** The Python code is written from scratch. The Go tool is a behavioral
 reference for output parity only, and its source is never copied, translated, or vendored into this

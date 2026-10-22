@@ -36,10 +36,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import filetype
-import plyvel
 from mimesniff import what as detect_content_type
 
-from chromedbpy import goencoding
+from chromedbpy import goencoding, leveldb
 
 _META_PREFIX = b"META:"
 _RECORD_PREFIX = b"_"
@@ -277,7 +276,7 @@ def _load_records(leveldb_dir: Path) -> list[_Record]:
         _copy_leveldb(leveldb_dir, target)
 
         records: list[_Record] = []
-        with plyvel.DB(str(target), create_if_missing=True) as db:
+        with leveldb.DB(str(target), create_if_missing=True) as db:
             for key, value in db:
                 if key.startswith(_META_PREFIX):
                     # Parsed for validation, never emitted, matching the Go tool.
@@ -439,7 +438,7 @@ def run(profile_path: str) -> int:
         print(f"Error copying directory: {exc}")
         print(f"Error opening LevelDB: {exc}")
         return 1
-    except (LocalStorageError, plyvel.Error, OSError) as exc:
+    except (LocalStorageError, leveldb.Error, OSError) as exc:
         print(f"Error opening LevelDB: {exc}")
         return 1
 

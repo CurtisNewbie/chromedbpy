@@ -11,9 +11,9 @@ import base64
 import json
 import sys
 
-import plyvel
 import pytest
 
+from chromedbpy import leveldb
 from chromedbpy.cli import main
 from profile_fixture import ProfileFixture
 
@@ -31,7 +31,7 @@ def _run(profile_path, capsys):
 
 def _put(profile_path, key: bytes, value: bytes) -> None:
     """Write one raw LevelDB entry the fixture cannot build."""
-    database = plyvel.DB(
+    database = leveldb.DB(
         str(profile_path / "Local Storage" / "leveldb"), create_if_missing=True
     )
     try:

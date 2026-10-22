@@ -7,14 +7,15 @@ name = "chromedbpy"
 version = "0.1.0"
 description = "Read Chromium cookies and local storage from Python"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.15"
 license = "MIT"
 dependencies = [
     "cryptography",
     "keyring",
     "mimesniff",
     "filetype",
-    "plyvel",
+    "plyvel-ci>=1.5.1; python_version < '3.12'",
+    "plyvel-next>=2.1.2,<3; python_version >= '3.12'",
 ]
 
 [project.scripts]
